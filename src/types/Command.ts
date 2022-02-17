@@ -1,10 +1,13 @@
+// TODO: Переделать класс команд, проблема с типами аргументов
+
 import { GuildMember, Message } from 'discord.js';
 import { client } from '../../index';
 import { subscriptionPlayerListener } from '../events/player';
+import { FilterName } from '../utils/AudioTransformer';
 import { Subscription } from './Subscription';
 
 export interface ExecuteOptions {
-  args?: string[];
+  args?: string[] | FilterName[];
   member?: GuildMember;
   message: Message;
   subscription?: Subscription;

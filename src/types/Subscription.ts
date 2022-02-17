@@ -11,8 +11,9 @@ import {
   VoiceConnectionStatus,
 } from '@discordjs/voice';
 import { Guild, Snowflake, TextBasedChannels } from 'discord.js';
-import ytdl from 'ytdl-core';
+import { Readable } from 'stream';
 import { client } from '../../index';
+import { AudioTransformer, FilterName } from '../utils/AudioTransformer';
 import { Track, TrackQueue } from './TrackQueue';
 
 interface SubscriptionListeners {
@@ -31,17 +32,21 @@ export class Subscription {
   private _channel: TextBasedChannels;
   private _connection: VoiceConnection | undefined;
   private _guild: Guild;
+  private _filter: FilterName | 'none';
   private _listeners: SubscriptionListeners;
   private _player: AudioPlayer;
   private _resource!: AudioResource;
   private _queue: TrackQueue;
+  private _transformer!: AudioTransformer;
 
   constructor(options: SubscriptionOptions) {
     this._channel = options.textChannel;
     this._guild = options.guild;
+    this._filter = 'none';
     this._listeners = options.listeners || { connectionListener: null, playerListener: null };
     this._player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
     this._queue = new TrackQueue();
+    this._transformer = new AudioTransformer();
   }
 
   get channel() {
@@ -52,6 +57,12 @@ export class Subscription {
   }
   get connection() {
     return this._connection;
+  }
+  get filter() {
+    return this._filter;
+  }
+  set filter(f) {
+    this._filter = f;
   }
   get listeners() {
     return this._listeners;
@@ -120,15 +131,13 @@ export class Subscription {
 
   private async play(track: Track) {
     try {
-      const info = await ytdl.getInfo(track.link);
+      let stream;
 
-      const format = ytdl.chooseFormat(info.formats, {
-        quality: [91, 92, 93, 140],
-        filter: (f) => f.container === 'mp4' || f.container === 'ts',
-      });
+      if (this._filter === 'none') stream = await this._transformer.fetchStream(track.link);
+      else stream = await this._transformer.filter(track.link, this._filter);
+      if (!stream) return;
 
-      this._resource = createAudioResource(format.url, { inlineVolume: true });
-
+      this._resource = createAudioResource(stream);
       this._player.play(this._resource);
     } catch (e) {
       console.log(e);
@@ -137,9 +146,9 @@ export class Subscription {
 
   async playNext(position?: number) {
     try {
-      let track: Track | null
+      let track: Track | null;
 
-      if (position) track = this._queue.jump(position)
+      if (position) track = this._queue.jump(position);
       else track = this._queue.next();
 
       if (!track) {
@@ -160,6 +169,20 @@ export class Subscription {
       if (!track) return;
 
       this.play(track);
+    } catch (e) {
+      console.log(e);
+    }
+  }
+
+  async seek(ts: number) {
+    //ts in miliseconds
+    try {
+      const stream = await this._transformer.seek(this._queue.current!.link, ts / 1000); // Условия
+
+      if (!stream) return;
+
+      this._resource = createAudioResource(stream);
+      this._player.play(this._resource);
     } catch (e) {
       console.log(e);
     }
