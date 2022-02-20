@@ -1,17 +1,17 @@
-import { PassThrough, Readable, Writable } from 'stream';
+import { Readable } from 'stream';
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import ytdl from 'ytdl-core';
-import fs, { WriteStream } from 'fs';
 import { validateYouTubeURL } from './Search';
 
 export type FilterName = 'bassboost' | 'nightcore';
 type Filters = Map<FilterName, Array<string>>;
 
-const ffmpegOptions: string[] = ['-i', '-', '-f', 'mp3', '-y', '-ar', '44100', '-ac', '2', 'pipe:1'];
+const ffmpegOptions: string[] = ['-i', '-', '-f', 'mp3', '-y', '-ar', '44100', '-ac', '2'];
 const filters: Filters = new Map([
   ['bassboost', ['-filter:a', 'bass=g=15']],
   ['nightcore', ['-filter:a', 'atempo=1.06,asetrate=44100*1.25']],
 ]);
+const pipe = 'pipe:1';
 
 export class AudioTransformer {
   private _ffmpeg: ChildProcessWithoutNullStreams | undefined;
@@ -38,25 +38,35 @@ export class AudioTransformer {
     if (this._ffmpeg) this._stream.unpipe(this._ffmpeg.stdin);
     if (!(await this.fetchStream(link))) return;
 
-    const pipe = ffmpegOptions.pop()!;
     const opt = [...ffmpegOptions, ...filters.get(filter)!, pipe];
-    ffmpegOptions.push(pipe)
+    const ffmpeg = spawn('ffmpeg', opt);
 
-    this._ffmpeg = spawn('ffmpeg', opt);
+    this._ffmpeg = ffmpeg;
     this._stream.pipe(this._ffmpeg.stdin);
+
+    ffmpeg.stdout.on('close', () => {
+      ffmpeg.stdout.removeAllListeners('close');
+      this._stream.unpipe(ffmpeg.stdin);
+    });
 
     return this._ffmpeg.stdout;
   }
 
-  async seek(link: string, timestamp: number): Promise<Readable | undefined> {
+  async seek(link: string, timestamp: number | string): Promise<Readable | undefined> {
     if (!validateYouTubeURL(link)) return;
     if (this._ffmpeg) this._stream.unpipe(this._ffmpeg.stdin);
     if (!(await this.fetchStream(link))) return;
 
-    const opt = ['-ss', `${timestamp}`, ...ffmpegOptions];
+    const opt = ['-ss', `${timestamp}`, ...ffmpegOptions, pipe];
+    const ffmpeg = spawn('ffmpeg', opt);
 
-    this._ffmpeg = spawn('ffmpeg', opt);
+    this._ffmpeg = ffmpeg;
     this._stream.pipe(this._ffmpeg.stdin);
+
+    ffmpeg.stdout.on('close', () => {
+      ffmpeg.stdout.removeAllListeners('close');
+      this._stream.unpipe(ffmpeg.stdin);
+    });
 
     return this._ffmpeg.stdout;
   }
